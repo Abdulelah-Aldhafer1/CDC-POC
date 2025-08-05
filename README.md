@@ -4,12 +4,8 @@ A robust, scalable big data streaming solution that processes user engagement ev
 
 ## 🏗️ Architecture Overview
 
-```
-PostgreSQL → Debezium → Kafka → Flink → [BigQuery, Redis, External API]
-     ↓           ↓        ↓       ↓           ↓       ↓        ↓
-  1M/5min    CDC WAL   16 parts  Exactly    30min   <5sec    HTTP
-  events     logical   topics    Once       parts   SLA      sink
-```
+![Real-Time Data Processing Pipeline Timeline](arc.png)
+
 
 ### Key Components
 
