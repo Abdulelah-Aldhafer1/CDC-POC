@@ -1,0 +1,38 @@
+# Claude Code artifacts
+.claude/
+
+# Monitoring data
+monitoring/
+
+# Log files
+logs/
+*.log
+
+# Docker volumes data
+postgres_data/
+kafka_data/
+redis_data/
+flink_data/
+
+# Build artifacts
+target/
+*.jar
+*.class
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+
+# Temporary files
+tmp/
+temp/
