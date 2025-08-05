@@ -193,7 +193,7 @@ docker-compose exec data-generator \
 ### Data Validation
 ```bash
 # Check Redis data
-docker-compose exec redis redis-cli ZRANGE top_engagement:10min 0 -1 WITHSCORES
+docker-compose exec redis redis-cli -a redis123 ZRANGE top_engagement:10min 0 -1 WITHSCORES
 
 # Query BigQuery (if configured)
 bq query "SELECT content_type, AVG(engagement_pct) FROM analytics.engagement_events 

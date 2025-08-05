@@ -109,7 +109,7 @@ check_service_health() {
     done
     
     # Check Redis
-    until docker-compose exec redis redis-cli ping | grep PONG; do
+    until docker-compose exec redis redis-cli -a redis123 ping | grep PONG; do
         print_warning "Waiting for Redis to be ready..."
         sleep 5
     done
