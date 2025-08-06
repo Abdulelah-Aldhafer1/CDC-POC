@@ -5,9 +5,9 @@ services:
     image: postgres:14
     container_name: cdc_postgres
     environment:
-      POSTGRES_DB: engagement_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-engagement_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
     ports:
       - "5432:5432"
@@ -45,7 +45,7 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_CONFLUENT_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      KAFKA_CONFLUENT_SCHEMA_REGISTRY_URL: ${KAFKA_SCHEMA_REGISTRY_URL:-http://schema-registry:8081}
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_NUM_PARTITIONS: 16
     volumes:
@@ -63,7 +63,7 @@ services:
       - "8081:8081"
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'kafka:29092'
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
     networks:
       - cdc_network
@@ -95,7 +95,7 @@ services:
     container_name: cdc_redis
     ports:
       - "6379:6379"
-    command: redis-server --appendonly yes --requirepass redis123
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     networks:
@@ -106,19 +106,19 @@ services:
     image: flink:1.17-scala_2.12-java11
     container_name: cdc_jobmanager
     ports:
-      - "8080:8080"
+      - "8080:8081"
     command: jobmanager
     environment:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
-        parallelism.default: 16
-        taskmanager.memory.process.size: 4096m
+        parallelism.default: ${FLINK_PARALLELISM:-16}
+        taskmanager.memory.process.size: ${FLINK_TASKMANAGER_MEMORY:-4096m}
         taskmanager.memory.flink.size: 2048m
         taskmanager.numberOfTaskSlots: 4
-        execution.checkpointing.interval: 30s
+        execution.checkpointing.interval: ${FLINK_CHECKPOINT_INTERVAL:-30s}
         execution.checkpointing.mode: EXACTLY_ONCE
-        state.backend: rocksdb
+        state.backend: filesystem
         state.checkpoints.dir: file:///tmp/flink-checkpoints
         restart-strategy: exponential-delay
         restart-strategy.exponential-delay.initial-backoff: 1s
@@ -127,7 +127,6 @@ services:
         restart-strategy.exponential-delay.reset-backoff-threshold: 5min
     volumes:
       - flink_data:/tmp/flink-checkpoints
-      - ./flink/lib:/opt/flink/lib
     networks:
       - cdc_network
 
@@ -137,21 +136,17 @@ services:
     depends_on:
       - jobmanager
     command: taskmanager
-    deploy:
-      replicas: 4
     environment:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
         taskmanager.numberOfTaskSlots: 4
-        taskmanager.memory.process.size: 4096m
+        taskmanager.memory.process.size: ${FLINK_TASKMANAGER_MEMORY:-4096m}
         taskmanager.memory.flink.size: 2048m
     volumes:
       - flink_data:/tmp/flink-checkpoints
-      - ./flink/lib:/opt/flink/lib
     networks:
       - cdc_network
-
 
   # Data Generator Service
   data-generator:
@@ -162,12 +157,14 @@ services:
     depends_on:
       - postgres
     environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: engagement_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      GENERATION_RATE: 200000  # 200k records per minute (1M per 5 min)
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-engagement_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      GENERATION_RATE: ${GENERATION_RATE:-200000}
+      BURST_MODE: ${BURST_MODE:-false}
+      BURST_COUNT: ${BURST_COUNT:-100000}
     networks:
       - cdc_network
 

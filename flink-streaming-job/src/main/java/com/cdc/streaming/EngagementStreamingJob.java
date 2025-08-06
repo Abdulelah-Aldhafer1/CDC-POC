@@ -1,61 +1,61 @@
 package com.cdc.streaming;
 
-import com.cdc.streaming.model.ContentInfo;
-import com.cdc.streaming.model.EngagementEvent;
-import com.cdc.streaming.model.EnrichedEvent;
-import com.cdc.streaming.sinks.BigQuerySink;
-import com.cdc.streaming.sinks.RedisSink;
-import com.fasterxml.jackson.databind.JsonNode;
+import com.cdc.streaming.models.*;
+import com.cdc.streaming.sinks.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.common.functions.RichMapFunction;
-import org.apache.flink.api.common.serialization.SimpleStringSchema;
+import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.state.MapState;
 import org.apache.flink.api.common.state.MapStateDescriptor;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.common.time.Time;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
-import org.apache.flink.runtime.state.hashmap.HashMapStateBackend;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
+import org.apache.flink.streaming.api.functions.co.KeyedCoProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.Properties;
+import java.util.Map;
 
 /**
- * Main Flink streaming job for processing engagement events
- * Implements CDC ingestion, enrichment, and multi-sink fan-out
+ * Real-time CDC engagement streaming job
+ * Processes 1M records per 5 minutes with <5 second Redis latency SLA
+ * 
+ * Architecture:
+ * PostgreSQL (CDC) -> Kafka -> Flink -> Redis (real-time) + BigQuery (analytics)
  */
 public class EngagementStreamingJob {
     private static final Logger LOG = LoggerFactory.getLogger(EngagementStreamingJob.class);
     
-    // Configuration constants
-    private static final String KAFKA_BOOTSTRAP_SERVERS = "localhost:9092";
+    // Configuration from environment variables
+    private static String getEnvOrDefault(String key, String defaultValue) {
+        return System.getenv(key) != null ? System.getenv(key) : defaultValue;
+    }
+    
+    private static final String KAFKA_BOOTSTRAP_SERVERS = getEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092");
     private static final String ENGAGEMENT_EVENTS_TOPIC = "cdc.engagement_db.public.engagement_events";
     private static final String CONTENT_TOPIC = "cdc.engagement_db.public.content";
-    private static final String CONSUMER_GROUP = "engagement-streaming-job";
+    private static final String CONSUMER_GROUP = getEnvOrDefault("KAFKA_CONSUMER_GROUP", "engagement-streaming-job");
     
-    // Redis configuration
-    private static final String REDIS_HOST = "localhost";
-    private static final int REDIS_PORT = 6379;
-    private static final String REDIS_PASSWORD = "redis123";
+    // Redis configuration from environment
+    private static final String REDIS_HOST = getEnvOrDefault("REDIS_HOST", "localhost");
+    private static final int REDIS_PORT = Integer.parseInt(getEnvOrDefault("REDIS_PORT", "6379"));
+    private static final String REDIS_PASSWORD = getEnvOrDefault("REDIS_PASSWORD", "");
     
-    // BigQuery configuration
-    private static final String BIGQUERY_PROJECT_ID = "your-project-id";
-    private static final String BIGQUERY_DATASET = "analytics";
-    private static final String BIGQUERY_TABLE = "engagement_events";
+    // BigQuery configuration from environment
+    private static final String BIGQUERY_PROJECT_ID = getEnvOrDefault("BIGQUERY_PROJECT_ID", "your-project-id");
+    private static final String BIGQUERY_DATASET = getEnvOrDefault("BIGQUERY_DATASET", "analytics");
+    private static final String BIGQUERY_TABLE = getEnvOrDefault("BIGQUERY_TABLE", "engagement_events");
     
     // Side outputs for error handling
     private static final OutputTag<String> PARSING_ERRORS = new OutputTag<String>("parsing-errors") {};
@@ -113,15 +113,20 @@ public class EngagementStreamingJob {
         
         // Execute the job
         LOG.info("Starting Engagement Streaming Job...");
+        LOG.info("Configuration - Kafka: {}, Redis: {}:{}, BigQuery: {}.{}.{}", 
+                KAFKA_BOOTSTRAP_SERVERS, REDIS_HOST, REDIS_PORT, 
+                BIGQUERY_PROJECT_ID, BIGQUERY_DATASET, BIGQUERY_TABLE);
         env.execute("Engagement Streaming Job");
     }
     
     private static void configureEnvironment(StreamExecutionEnvironment env) {
-        // Set parallelism to match Kafka partitions
-        env.setParallelism(16);
+        // Set parallelism from environment or default
+        int parallelism = Integer.parseInt(getEnvOrDefault("FLINK_PARALLELISM", "16"));
+        env.setParallelism(parallelism);
         
         // Enable checkpointing for exactly-once semantics
-        env.enableCheckpointing(30000); // 30 seconds
+        int checkpointInterval = Integer.parseInt(getEnvOrDefault("FLINK_CHECKPOINT_INTERVAL", "30000"));
+        env.enableCheckpointing(checkpointInterval);
         env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
         env.getCheckpointConfig().setMinPauseBetweenCheckpoints(5000);
         env.getCheckpointConfig().setCheckpointTimeout(60000);
@@ -132,12 +137,12 @@ public class EngagementStreamingJob {
         env.getCheckpointConfig().setCheckpointStorage("file:///tmp/flink-checkpoints");
         
         // Configure restart strategy
-        env.setRestartStrategy(org.apache.flink.api.common.restartstrategy.RestartStrategies
+        env.setRestartStrategy(RestartStrategies
             .exponentialDelayRestart(
-                org.apache.flink.api.common.time.Time.seconds(1),
-                org.apache.flink.api.common.time.Time.minutes(10),
+                Time.seconds(1),
+                Time.minutes(10),
                 1.1,
-                org.apache.flink.api.common.time.Time.minutes(5),
+                Time.minutes(5),
                 0.1
             ));
     }
