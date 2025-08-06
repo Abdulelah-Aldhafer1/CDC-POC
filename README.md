@@ -223,14 +223,6 @@ docker-compose exec data-generator \
 # Check Redis data
 docker-compose exec redis redis-cli -a redis123 ZRANGE top_engagement:10min 0 -1 WITHSCORES
 
-# Check BigQuery data
-docker-compose exec flink-streaming-job \
-  bq query --use_legacy_sql=false \
-  "SELECT COUNT(*) as total_events, 
-          DATE(event_ts) as event_date 
-   FROM \`your-project.analytics.engagement_events\` 
-   WHERE event_ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)
-   GROUP BY event_date"
 
 # Check Kafka topic data
 docker-compose exec kafka kafka-console-consumer \
@@ -285,96 +277,6 @@ For enterprise-grade production deployment, I recommend migrating to **Confluent
 - **Built-in connectors**: Native support for Kafka, BigQuery, Redis
 - **Monitoring**: Integrated monitoring and alerting for Flink jobs
 
-### Migration Steps
 
-#### 1. **Setup Confluent Cloud Environment**
-```bash
-# Install Confluent CLI
-curl -L --http1.1 https://cnfl.io/cli | sh -s -- -b /usr/local/bin
-
-# Login to Confluent Cloud
-confluent login
-
-# Create environment and cluster
-confluent environment create cdc-production
-confluent kafka cluster create cdc-cluster --cloud aws --region us-west-2
-```
-
-#### 2. **Configure Schema Registry**
-```bash
-# Enable Schema Registry
-confluent schema-registry cluster enable --cloud aws --region us-west-2
-
-# Register engagement event schema
-confluent schema-registry schema create --subject engagement-events-value \
-  --schema engagement-schema.json --type avro
-```
-
-#### 3. **Deploy Managed Connectors**
-```bash
-# Deploy Debezium PostgreSQL connector
-confluent connect create debezium-postgres \
-  --config debezium-postgres-config.json
-
-# Deploy BigQuery sink connector
-confluent connect create bigquery-sink \
-  --config bigquery-sink-config.json
-```
-
-#### 4. **Migrate Flink Jobs**
-```sql
--- Confluent Flink SQL example
-CREATE TABLE engagement_events (
-    id BIGINT,
-    content_id STRING,
-    user_id STRING,
-    event_type STRING,
-    event_ts TIMESTAMP(3),
-    duration_ms INT,
-    device STRING,
-    raw_payload STRING,
-    proc_time AS PROCTIME()
-) WITH (
-    'connector' = 'kafka',
-    'topic' = 'engagement_events',
-    'properties.bootstrap.servers' = 'your-confluent-cloud-endpoint:9092',
-    'properties.security.protocol' = 'SASL_SSL',
-    'properties.sasl.mechanism' = 'PLAIN',
-    'properties.sasl.jaas.config' = 'org.apache.kafka.common.security.plain.PlainLoginModule required username="your-api-key" password="your-api-secret";',
-    'format' = 'json'
-);
-
--- Create Redis sink table
-CREATE TABLE redis_engagement (
-    content_id STRING,
-    engagement_score DOUBLE,
-    event_count BIGINT
-) WITH (
-    'connector' = 'redis',
-    'host' = 'your-redis-host',
-    'port' = '6379',
-    'password' = 'your-redis-password',
-    'key' = 'engagement:${content_id}',
-    'ttl' = '3600'
-);
-
--- Streaming query
-INSERT INTO redis_engagement
-SELECT 
-    content_id,
-    AVG(duration_ms) / 1000.0 as engagement_score,
-    COUNT(*) as event_count
-FROM engagement_events
-GROUP BY content_id, TUMBLE(proc_time, INTERVAL '10' MINUTE);
-```
-
-### Benefits of Migration
-
-- **99.9% Uptime SLA**: Enterprise-grade reliability
-- **Auto-scaling**: Handle traffic spikes automatically
-- **Global deployment**: Multi-region disaster recovery
-- **Managed operations**: No more Kafka cluster management
-- **Cost optimization**: Pay only for what you use
-- **Security compliance**: SOC 2, PCI DSS, HIPAA ready
 
 
